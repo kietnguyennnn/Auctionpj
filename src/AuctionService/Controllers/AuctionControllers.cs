@@ -3,7 +3,9 @@ using AuctionService.Data;
 using AuctionService.DTOs;
 using AuctionService.Entities;
 using AutoMapper;
+using AutoMapper.QueryableExtensions;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 
 namespace AuctionService.Controllers;
@@ -20,13 +22,16 @@ public class AuctionControllers : ControllerBase
         _mapper = mapper;
     }
     [HttpGet]
-    public async Task<ActionResult<List<AuctionDto>>> GetAllAuctions()
+    public async Task<ActionResult<List<AuctionDto>>> GetAllAuctions(string date)
     {
-        var auctions = await _context.Auctions
-        .Include(x => x.Item)
-        .OrderBy(x => x.Item.Make)
-        .ToListAsync();
-        return _mapper.Map<List<AuctionDto>>(auctions);
+        var query = _context.Auctions.OrderBy(x => x.Item.Make).AsQueryable();//Giữ query ở dạng expression để có thể thêm điều kiện, được thực thi một lần duy nhất khi gọi ToListAsync(),FirstOrDefaultAsync(),CountAsync(),...
+        if (!string.IsNullOrEmpty(date))
+        {
+            query = query.Where(x=> x.UpdatedAt.CompareTo(DateTime.Parse(date).ToUniversalTime()) > 0);
+        }
+
+        
+        return await query.ProjectTo<AuctionDto>(_mapper.ConfigurationProvider).ToListAsync();//Không load entity, mà map trực tiếp sang DTO ngay trong SQL,chỉ lấy đúng các field cần thiết
     }
 
     [HttpGet("{id}")]

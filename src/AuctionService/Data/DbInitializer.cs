@@ -36,7 +36,7 @@ public class DbInitializer
                 Item = new Item
                 {
                     Make = "Ford",
-                    Model = "GT",
+                    Model = "GT",   
                     Color = "White",
                     Mileage = 50000,
                     Year = 2020,
