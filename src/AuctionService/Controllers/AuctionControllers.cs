@@ -4,6 +4,8 @@ using AuctionService.DTOs;
 using AuctionService.Entities;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
+using Contracts;
+using MassTransit;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
@@ -16,10 +18,12 @@ public class AuctionControllers : ControllerBase
 {
     private readonly AuctionDbContext _context;
     private readonly IMapper _mapper;
-    public AuctionControllers(AuctionDbContext context, IMapper mapper)
+    private readonly IPublishEndpoint _publishEndpoint;
+    public AuctionControllers(AuctionDbContext context, IMapper mapper, IPublishEndpoint publishEndpoint)
     {
         _context = context;
         _mapper = mapper;
+        _publishEndpoint = publishEndpoint;
     }
     [HttpGet]
     public async Task<ActionResult<List<AuctionDto>>> GetAllAuctions(string date)
@@ -27,10 +31,10 @@ public class AuctionControllers : ControllerBase
         var query = _context.Auctions.OrderBy(x => x.Item.Make).AsQueryable();//Giữ query ở dạng expression để có thể thêm điều kiện, được thực thi một lần duy nhất khi gọi ToListAsync(),FirstOrDefaultAsync(),CountAsync(),...
         if (!string.IsNullOrEmpty(date))
         {
-            query = query.Where(x=> x.UpdatedAt.CompareTo(DateTime.Parse(date).ToUniversalTime()) > 0);
+            query = query.Where(x => x.UpdatedAt.CompareTo(DateTime.Parse(date).ToUniversalTime()) > 0);
         }
 
-        
+
         return await query.ProjectTo<AuctionDto>(_mapper.ConfigurationProvider).ToListAsync();//Không load entity, mà map trực tiếp sang DTO ngay trong SQL,chỉ lấy đúng các field cần thiết
     }
 
@@ -54,10 +58,18 @@ public class AuctionControllers : ControllerBase
 
         auction.Seller = "test";
         _context.Auctions.Add(auction);
+
+        var newAuction = _mapper.Map<AuctionDto>(auction);
+        //publish event to rabbitmq
+
+        await _publishEndpoint.Publish(_mapper.Map<AuctionCreated>(newAuction));
+
         var result = await _context.SaveChangesAsync() > 0;
+
+
         if (!result) return BadRequest("Failed to create auction");
 
-        return CreatedAtAction(nameof(GetAuctionById), new { auction.Id }, _mapper.Map<AuctionDto>(auction));
+        return CreatedAtAction(nameof(GetAuctionById), new { auction.Id }, newAuction);
         //tạo response 201 Created,dùng GetAuctionById để tạo URL của resource,truyền id làm route parameter,và body response là AuctionDto. 
     }
 
@@ -75,7 +87,7 @@ public class AuctionControllers : ControllerBase
         auction.Item.Year = updateAuctionDto.Year ?? auction.Item.Year;
         auction.Item.Color = updateAuctionDto.Color ?? auction.Item.Color;
         auction.Item.Mileage = updateAuctionDto.Mileage ?? auction.Item.Mileage;
-
+        await _publishEndpoint.Publish(_mapper.Map<AuctionUpdated>(auction));
         var result = await _context.SaveChangesAsync() > 0;
         if (result) return Ok();
         return BadRequest("Failed to update auction");
@@ -87,6 +99,8 @@ public class AuctionControllers : ControllerBase
         var auction = await _context.Auctions.FindAsync(id);
         if (auction == null) return NotFound();
         _context.Auctions.Remove(auction);
+
+        await _publishEndpoint.Publish<AuctionDeleted>(new {Id = auction.Id.ToString()});
         var result = await _context.SaveChangesAsync() > 0;
         if (result) return Ok();
         return BadRequest("Failed to delete auction");

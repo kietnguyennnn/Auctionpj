@@ -23,6 +23,7 @@ public class DbInitializer
 
         var count = await DB.CountAsync<Item>();
 
+        //lấy dữ liệu từ Auction Service
         using var scope = app.Services.CreateScope();
         var httpClient = scope.ServiceProvider.GetService<AuctionSvcHttpClient>();
         var items = await httpClient.GetItemsForSerchDB();
